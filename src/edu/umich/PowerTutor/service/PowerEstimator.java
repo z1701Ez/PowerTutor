@@ -30,9 +30,11 @@ import edu.umich.PowerTutor.util.HistoryBuffer;
 import edu.umich.PowerTutor.util.NotificationService;
 import edu.umich.PowerTutor.util.SystemInfo;
 import edu.umich.PowerTutor.widget.PowerWidget;
-
+import android.annotation.TargetApi;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.os.Build;
+import android.os.Environment;
 import android.os.SystemClock;
 import android.preference.PreferenceManager;
 import android.provider.Settings;
@@ -42,6 +44,7 @@ import android.util.SparseArray;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.text.DecimalFormat;
 import java.util.Calendar;
@@ -58,6 +61,7 @@ import java.util.zip.DeflaterOutputStream;
  *  to spidermoneky (or looked at by the user) and to implement the
  *  ICounterService IPC interface.
  */
+@TargetApi(Build.VERSION_CODES.KITKAT)
 public class PowerEstimator implements Runnable {
   private static final String TAG = "PowerEstimator";
 
@@ -94,6 +98,12 @@ public class PowerEstimator implements Runnable {
   private Object iterationLock = new Object();
   private long lastWrittenIteration;
 
+  //  for our Log
+  private File permLog; 
+  private OutputStreamWriter permLogStream;
+  private DeflaterOutputStream deflatePermLog;
+  
+  
   public PowerEstimator(UMLoggerService context){
     this.context = context;
     prefs = PreferenceManager.getDefaultSharedPreferences(context);
@@ -124,11 +134,27 @@ public class PowerEstimator implements Runnable {
          */
         logUploader.upload(logFilename);
       }
+     
+      permLog = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS + "/PowerLog.log");
+      
+      System.out.println("TESTING RESULT HERE");
+      System.out.println(permLog);
+      System.out.println(logFilename);
+      
       Deflater deflater = new Deflater();
       deflater.setDictionary(DEFLATE_DICTIONARY.getBytes());
       deflateStream = new DeflaterOutputStream(
                           new FileOutputStream(logFilename));
       logStream = new OutputStreamWriter(deflateStream);
+      
+      Deflater deflater2 = new Deflater();
+      deflater2.setDictionary(DEFLATE_DICTIONARY.getBytes());
+      //deflatePermLog = new DeflaterOutputStream( new FileOutputStream(permLog) );
+      
+      OutputStream logStream = (new FileOutputStream(permLog));
+      permLogStream = new OutputStreamWriter(logStream);
+      
+      
     } catch(IOException e) {
       logStream = null;
       Log.e(TAG, "Failed to open log file.  No log will be kept.");
@@ -233,6 +259,7 @@ public class PowerEstimator implements Runnable {
                  (appId == null || !appId.equals(newAppId))) {
                 try {
                   logStream.write("associate " + uid + " " + newAppId + "\n");
+                  permLogStream.write("associate " + uid + " " + newAppId + "\n");
                 } catch(IOException e) {
                   Log.w(TAG, "Failed to write to log file");
                 }
@@ -332,17 +359,25 @@ public class PowerEstimator implements Runnable {
           if(firstLogIteration) {
             firstLogIteration = false;
             logStream.write("time " + System.currentTimeMillis() + "\n");
+            permLogStream.write("time " + System.currentTimeMillis() + "\n");
             Calendar cal = new GregorianCalendar();
             logStream.write("localtime_offset " +
                             (cal.get(Calendar.ZONE_OFFSET) +
                              cal.get(Calendar.DST_OFFSET)) + "\n");
+            permLogStream.write("localtime_offset " +
+                    (cal.get(Calendar.ZONE_OFFSET) +
+                     cal.get(Calendar.DST_OFFSET)) + "\n");
             logStream.write("model " + phoneConstants.modelName() + "\n");
+            permLogStream.write("model " + phoneConstants.modelName() + "\n");
             if(NotificationService.available()) {
               logStream.write("notifications-active\n");
+              permLogStream.write("notifications-active\n");
             }
             if(bst.hasFullCapacity()) {
               logStream.write("batt_full_capacity " + bst.getFullCapacity()
                               + "\n");
+              permLogStream.write("batt_full_capacity " + bst.getFullCapacity()
+                      + "\n");
             }
             synchronized(uidAppIds) {
               for(int uid : uidAppIds.keySet()) {
@@ -351,14 +386,20 @@ public class PowerEstimator implements Runnable {
                 }
                 logStream.write("associate " + uid + " " + uidAppIds.get(uid)
                                 + "\n");
+                permLogStream.write("associate " + uid + " " + uidAppIds.get(uid)
+                        + "\n");
               }
             }
           }
           logStream.write("begin " + iter + "\n");
           logStream.write("total-power " + (long)Math.round(totalPower) + '\n');
+          permLogStream.write("begin " + iter + "\n");
+          permLogStream.write("total-power " + (long)Math.round(totalPower) + '\n');
           if(hasMem) {
             logStream.write("meminfo " + memInfo[0] + " " + memInfo[1] +
                             " " + memInfo[2] + " " + memInfo[3] + "\n");
+            permLogStream.write("meminfo " + memInfo[0] + " " + memInfo[1] +
+                    " " + memInfo[2] + " " + memInfo[3] + "\n");
           }
           for(int i = 0; i < components; i++) {
             IterationData data = dataTemp[i];
@@ -371,10 +412,16 @@ public class PowerEstimator implements Runnable {
                 if(uid == SystemInfo.AID_ALL) {
                   logStream.write(name + " " + (long)Math.round(
                       powerData.getCachedPower()) + "\n");
+                  permLogStream.write(name + " " + (long)Math.round(
+                          powerData.getCachedPower()) + "\n");
+                  
                   powerData.writeLogDataInfo(logStream);
+                  powerData.writeLogDataInfo(permLogStream);
                 } else {
                   logStream.write(name + "-" + uid + " " + (long)Math.round(
                                   powerData.getCachedPower()) + "\n");
+                  permLogStream.write(name + "-" + uid + " " + (long)Math.round(
+                          powerData.getCachedPower()) + "\n");
                 }
               }
               data.recycle();
@@ -391,6 +438,7 @@ public class PowerEstimator implements Runnable {
           if(logUploader.shouldUpload()) {
             try {
               logStream.close();
+              permLogStream.close();
             } catch(IOException e) {
               Log.w(TAG, "Failed to flush and close log stream");
             }
@@ -429,6 +477,7 @@ public class PowerEstimator implements Runnable {
     synchronized(fileWriteLock) {
       if(logStream != null) try {
         logStream.close();
+        permLogStream.close();
       } catch(IOException e) {
         Log.w(TAG, "Failed to flush log file on exit");
       }
@@ -443,6 +492,7 @@ public class PowerEstimator implements Runnable {
     synchronized(fileWriteLock) {
       if(logStream != null) try {
         logStream.write(m);
+        permLogStream.write(m);
       } catch(IOException e) {
         Log.w(TAG, "Failed to write message to power log");
       }

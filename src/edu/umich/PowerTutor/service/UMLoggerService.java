@@ -134,7 +134,7 @@ public class UMLoggerService extends Service{
     } catch(NoSuchMethodException e) {
     }
     if(!foregroundSet) {
-      setForeground(false);
+      //setForeground(false);
       notificationManager.cancel(NOTIFICATION_ID);
     }
 
@@ -185,7 +185,7 @@ public class UMLoggerService extends Service{
     } catch(NoSuchMethodException e) {
     }
     if(!foregroundSet) {
-      setForeground(true);
+      //setForeground(true);
       notificationManager.notify(NOTIFICATION_ID, notification);
     }
   }
